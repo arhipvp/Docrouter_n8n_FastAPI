@@ -135,8 +135,23 @@
     },
     {
       "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8081/list-archive-tree",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        32
+      ],
+      "id": "b4cf89af-d650-47fa-b891-17453e68dcc8",
+      "name": "List Archive Tree"
+    },
+    {
+      "parameters": {
         "promptType": "define",
-        "text": "Ты маршрутизатор документов.\nFOLDER_ENDPOINTS:\n{{ JSON.stringify($('Folder Endpoints').item.json.folder_endpoints, null, 2) }}\nTEXT:\n---\n{{ $('Text').item.json.text }}\n---\nМета:\n- Страницы: {{ $('Text').item.json.pages }}\n- Язык: {{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\n\nОТВЕТ:\nВерни строго JSON без пояснений и лишних полей:\n{\"matched\":bool,\"selected_path\":string|null,\"confidence\":0..1,\"reason\":string,\"needs_new_folder\":bool,\"suggested_path\":string|null}\nselected_path и suggested_path — относительные пути без ведущего слэша, разделитель '/'.\nЕсли matched=false, обязательно needs_new_folder=true и предложи осмысленный suggested_path.\nЕсли matched=true, needs_new_folder=false и укажи selected_path.\n",
+        "text": "Ты маршрутизатор документов. Используй FOLDER_ENDPOINTS (плоский список конечных папок) и ARCHIVE_TREE (полная вложенная структура) для принятия решения.\nFOLDER_ENDPOINTS:\n{{ JSON.stringify($('Folder Endpoints').item.json.folder_endpoints, null, 2) }}\nARCHIVE_TREE:\n{{ JSON.stringify($('List Archive Tree').item.json.tree, null, 2) }}\nTEXT:\n---\n{{ $('Text').item.json.text }}\n---\nМета:\n- Страницы: {{ $('Text').item.json.pages }}\n- Язык: {{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\n\nОТВЕТ:\nВерни строго JSON без пояснений и лишних полей:\n{\"matched\":bool,\"selected_path\":string|null,\"confidence\":0..1,\"reason\":string,\"needs_new_folder\":bool,\"suggested_path\":string|null}\nselected_path и suggested_path — относительные пути без ведущего слэша, разделитель '/'.\nЕсли matched=false, обязательно needs_new_folder=true и предложи осмысленный suggested_path.\nЕсли matched=true, needs_new_folder=false и укажи selected_path.\n",
         "hasOutputParser": true,
         "options": {}
       },
@@ -395,6 +410,11 @@
             "index": 0
           },
           {
+            "node": "List Archive Tree",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Подготовка сайдкаров",
             "type": "main",
             "index": 0
@@ -472,6 +492,17 @@
       ]
     },
     "Folder Endpoints": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Archive Tree": {
       "main": [
         [
           {
