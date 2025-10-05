@@ -32,6 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger("docrouter.fastapi")
 
 ARCHIVE_ROOT = Path(r"C:\Data\archive").resolve()
+INBOX_ROOT = Path(r"C:\Data\inbox").resolve()
 
 # --------------------------------------------------------------------------------------
 # Langdetect globals
@@ -239,17 +240,33 @@ async def extract_text(file: UploadFile = File(...),
 
 @app.post("/extract-text-by-path")
 def extract_text_by_path(body: ExtractByPathIn):
-    path = os.path.normpath(body.file_path)
-    if not path.lower().endswith(".pdf"):
-        logger.warning(f"/extract-text-by-path wrong extension: {path}")
+    incoming_path = (body.file_path or "").strip()
+    if incoming_path.startswith("="):
+        incoming_path = incoming_path[1:]
+
+    try:
+        resolved_path = Path(incoming_path).resolve()
+    except Exception:
+        logger.warning(f"/extract-text-by-path invalid path: {incoming_path}")
+        return JSONResponse({"error": "invalid_path"}, status_code=400)
+
+    if resolved_path.suffix.lower() != ".pdf":
+        logger.warning(f"/extract-text-by-path wrong extension: {resolved_path}")
         return JSONResponse({"error": "only .pdf accepted"}, status_code=400)
-    if not os.path.exists(path):
-        logger.warning(f"/extract-text-by-path not found: {path}")
+
+    try:
+        resolved_path.relative_to(INBOX_ROOT)
+    except ValueError:
+        logger.warning(f"/extract-text-by-path outside inbox: {resolved_path}")
+        return JSONResponse({"error": "path_outside_inbox"}, status_code=400)
+
+    if not resolved_path.exists():
+        logger.warning(f"/extract-text-by-path not found: {resolved_path}")
         return JSONResponse({"error": "file not found"}, status_code=404)
 
-    logger.info(f"/extract-text-by-path: {path} ocr_langs={body.ocr_langs}")
+    logger.info(f"/extract-text-by-path: {resolved_path} ocr_langs={body.ocr_langs}")
     try:
-        result = extract_text_core(path, body.ocr_langs or "deu+eng+rus")
+        result = extract_text_core(str(resolved_path), body.ocr_langs or "deu+eng+rus")
         return result
     except HTTPException:
         raise
