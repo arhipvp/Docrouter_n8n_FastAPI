@@ -32,6 +32,12 @@ logging.basicConfig(
 logger = logging.getLogger("docrouter.fastapi")
 
 # --------------------------------------------------------------------------------------
+# Langdetect globals
+# --------------------------------------------------------------------------------------
+LANGDETECT_LOCK = threading.Lock()
+LANGDETECT_READY = False
+
+# --------------------------------------------------------------------------------------
 # Models
 # --------------------------------------------------------------------------------------
 class RouteApplyIn(BaseModel):
@@ -249,6 +255,22 @@ def extract_text_by_path(body: ExtractByPathIn):
         logger.exception("extract_text_by_path unexpected failure")
         return JSONResponse({"error": "extract_failed", "detail": str(e)}, status_code=500)
 
+def _ensure_langdetect_ready():
+    """Гарантирует единоразовый прогрев профилей langdetect."""
+    global LANGDETECT_READY
+    if LANGDETECT_READY:
+        return
+    with LANGDETECT_LOCK:
+        if LANGDETECT_READY:
+            return
+        try:
+            detect_langs("This is a warmup text for langdetect.")
+            LANGDETECT_READY = True
+            logger.info("langdetect warmed up")
+        except Exception as e:
+            logger.warning(f"langdetect warmup failed: {e}")
+
+
 @app.post("/lang")
 def lang_detect(body: LangIn):
     text = (body.text or "").strip()
@@ -257,7 +279,9 @@ def lang_detect(body: LangIn):
     if not text:
         return {"detected_lang": None, "prob": 0.0}
     try:
-        langs = detect_langs(text)
+        _ensure_langdetect_ready()
+        with LANGDETECT_LOCK:
+            langs = detect_langs(text)
         best = max(langs, key=lambda x: x.prob)
         result = {"detected_lang": str(best.lang), "prob": float(best.prob)}
         logger.info(f"/lang result: {result}")
@@ -324,6 +348,7 @@ def console_loop():
 
 @app.on_event("startup")
 def boot():
+    _ensure_langdetect_ready()
     t = threading.Thread(target=console_loop, daemon=True)
     t.start()
     logger.info("Console decision thread started")
