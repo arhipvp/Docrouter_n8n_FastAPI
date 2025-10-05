@@ -490,7 +490,7 @@ async def print_report(payload: Dict):
             sug_path = routing.get("selected_path") or routing.get("suggested_path") or ""
             print(f"path:   NEEDS NEW → {sug_path}  (conf={routing.get('confidence')})")
         if routing.get("reason"):
-            print(f"reason: {routing.get("reason")}")
+            print(f"reason: {routing.get('reason')}")
     print("\n-- SUMMARY (RU) --")
     print(sums.get('ru',""))
     print("\n-- SUMMARY (DE) --")
