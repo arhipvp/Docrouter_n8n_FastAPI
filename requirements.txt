@@ -3,3 +3,5 @@ uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 langdetect==1.0.9
 httpx==0.27.2
+pymupdf==1.24.9
+ocrmypdf==16.6.1
