@@ -66,7 +66,7 @@
           "parameters": [
             {
               "name": "text",
-              "value": "={{$json.text}}"
+              "value": "={{$json.full_text}}"
             }
           ]
         },
@@ -83,7 +83,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const textData = $('Text').item.json;\nconst langData = $('Lang').item.json;\nconst fileData = $('Code in JavaScript').item.json;\nconst normalize = value => (value ?? '').toString();\nconst fullText = normalize(textData.text);\nconst trimmed = fullText.trim();\nconst limit = 15000;\nconst truncatedText = trimmed.length > limit ? trimmed.slice(0, limit) : trimmed;\nconst truncated = trimmed.length > limit;\nconst summarize = (input, size = 400) => {\n  const compact = (input || '').replace(/\\s+/g, ' ').trim();\n  if (!compact) return '';\n  if (compact.length <= size) return compact;\n  const slice = compact.slice(0, size);\n  const cut = slice.lastIndexOf(' ');\n  return (cut > 120 ? slice.slice(0, cut) : slice).trim() + '…';\n};\nconst summaryForLang = (langCode) => {\n  if (langData.detected_lang === langCode) {\n    return summarize(truncatedText, 400);\n  }\n  const placeholders = {\n    ru: 'Краткое описание на русском получено автоматически (заглушка).',\n    de: 'Kurzzusammenfassung auf Deutsch automatisch erzeugt (Platzhalter).'\n  };\n  const base = summarize(truncatedText, 400);\n  return `${placeholders[langCode] || 'Summary placeholder.'}${base ? `\\n\\n${base}` : ''}`;\n};\nconst buildContent = (langCode) => {\n  const isOriginal = langData.detected_lang === langCode;\n  if (isOriginal) {\n    return { text: truncatedText, source: 'original' };\n  }\n  const placeholders = {\n    ru: 'Автоматический перевод недоступен. Заглушка.',\n    de: 'Automatische Übersetzung nicht verfügbar. Platzhalter.'\n  };\n  const preface = placeholders[langCode] || 'Translation placeholder.';\n  return { text: `${preface}\\n\\n${truncatedText}`, source: 'machine_translation_placeholder' };\n};\nreturn items.map(item => {\n  item.json.sidecar_metadata = {\n    inbox: { name: fileData.inbox_name, path: fileData.inbox_path },\n    extract: {\n      pages: textData.pages,\n      size_bytes: textData.size_bytes,\n      has_text_layer: textData.has_text_layer,\n      used_ocr: textData.used_ocr\n    },\n    language: { detected: langData.detected_lang, probability: langData.prob }\n  };\n  item.json.sidecar_summaries = {\n    ru: summaryForLang('ru'),\n    de: summaryForLang('de')\n  };\n  item.json.sidecar_content = {\n    ru: buildContent('ru'),\n    de: buildContent('de')\n  };\n  item.json.sidecar_content_truncated = truncated;\n  item.json.sidecar_source_text = truncatedText;\n  return item;\n});\n"
+        "jsCode": "const textData = $('Text').item.json;\nconst langData = $('Lang').item.json;\nconst fileData = $('Code in JavaScript').item.json;\nconst fullHolder = $('Сохраняем полный текст').item.json;\nconst normalize = value => (value ?? '').toString();\nconst fullText = normalize(fullHolder.full_text ?? textData.text);\nconst trimmed = fullText.trim();\nconst limit = 15000;\nconst truncatedText = trimmed.length > limit ? trimmed.slice(0, limit) : trimmed;\nconst truncated = trimmed.length > limit;\nconst summarize = (input, size = 400) => {\n  const compact = (input || '').replace(/\\s+/g, ' ').trim();\n  if (!compact) return '';\n  if (compact.length <= size) return compact;\n  const slice = compact.slice(0, size);\n  const cut = slice.lastIndexOf(' ');\n  return (cut > 120 ? slice.slice(0, cut) : slice).trim() + '…';\n};\nconst summaryForLang = (langCode) => {\n  if (langData.detected_lang === langCode) {\n    return summarize(truncatedText, 400);\n  }\n  const placeholders = {\n    ru: 'Краткое описание на русском получено автоматически (заглушка).',\n    de: 'Kurzzusammenfassung auf Deutsch automatisch erzeugt (Platzhalter).'\n  };\n  const base = summarize(truncatedText, 400);\n  return `${placeholders[langCode] || 'Summary placeholder.'}${base ? `\\n\\n${base}` : ''}`;\n};\nconst buildContent = (langCode) => {\n  const isOriginal = langData.detected_lang === langCode;\n  if (isOriginal) {\n    return { text: truncatedText, source: 'original' };\n  }\n  const placeholders = {\n    ru: 'Автоматический перевод недоступен. Заглушка.',\n    de: 'Automatische Übersetzung nicht verfügbar. Platzhalter.'\n  };\n  const preface = placeholders[langCode] || 'Translation placeholder.';\n  return { text: `${preface}\\n\\n${truncatedText}`, source: 'machine_translation_placeholder' };\n};\nreturn items.map(item => {\n  item.json.sidecar_metadata = {\n    inbox: { name: fileData.inbox_name, path: fileData.inbox_path },\n    extract: {\n      pages: textData.pages,\n      size_bytes: textData.size_bytes,\n      has_text_layer: textData.has_text_layer,\n      used_ocr: textData.used_ocr\n    },\n    language: { detected: langData.detected_lang, probability: langData.prob }\n  };\n  item.json.sidecar_summaries = {\n    ru: summaryForLang('ru'),\n    de: summaryForLang('de')\n  };\n  item.json.sidecar_content = {\n    ru: buildContent('ru'),\n    de: buildContent('de')\n  };\n  item.json.sidecar_content_truncated = truncated;\n  item.json.sidecar_source_text = truncatedText;\n  return item;\n});\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -107,7 +107,11 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "response": {
+            "maxResponseSize": 64
+          }
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -120,9 +124,34 @@
     },
     {
       "parameters": {
+        "keepOnlySet": false,
+        "values": {
+          "string": [
+            {
+              "name": "full_text",
+              "value": "={{$json.text}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        96,
+        -80
+      ],
+      "id": "dcfc14ad-7c3f-4f27-b166-c8bdf5c95e90",
+      "name": "Сохраняем полный текст"
+    },
+    {
+      "parameters": {
         "method": "GET",
         "url": "http://127.0.0.1:8081/folder-endpoints",
-        "options": {}
+        "options": {
+          "response": {
+            "maxResponseSize": 64
+          }
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -137,7 +166,11 @@
       "parameters": {
         "method": "GET",
         "url": "http://127.0.0.1:8081/list-archive-tree",
-        "options": {}
+        "options": {
+          "response": {
+            "maxResponseSize": 64
+          }
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -151,7 +184,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "Ты маршрутизатор документов. Используй FOLDER_ENDPOINTS (плоский список конечных папок) и ARCHIVE_TREE (полная вложенная структура) для принятия решения.\nFOLDER_ENDPOINTS:\n{{ JSON.stringify($('Folder Endpoints').item.json.folder_endpoints, null, 2) }}\nARCHIVE_TREE:\n{{ JSON.stringify($('List Archive Tree').item.json.tree, null, 2) }}\nTEXT:\n---\n{{ $('Text').item.json.text }}\n---\nМета:\n- Страницы: {{ $('Text').item.json.pages }}\n- Язык: {{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\n\nОТВЕТ:\nВерни строго JSON без пояснений и лишних полей:\n{\"matched\":bool,\"selected_path\":string|null,\"confidence\":0..1,\"reason\":string,\"needs_new_folder\":bool,\"suggested_path\":string|null}\nselected_path и suggested_path — относительные пути без ведущего слэша, разделитель '/'.\nЕсли matched=false, обязательно needs_new_folder=true и предложи осмысленный suggested_path.\nЕсли matched=true, needs_new_folder=false и укажи selected_path.\n",
+        "text": "Ты маршрутизатор документов. Используй FOLDER_ENDPOINTS (плоский список конечных папок) и ARCHIVE_TREE (полная вложенная структура) для принятия решения.\nFOLDER_ENDPOINTS:\n{{ JSON.stringify($('Folder Endpoints').item.json.folder_endpoints, null, 2) }}\nARCHIVE_TREE:\n{{ JSON.stringify($('List Archive Tree').item.json.tree, null, 2) }}\nTEXT:\n---\n{{ $('Сохраняем полный текст').item.json.full_text || $('Text').item.json.text }}\n---\nМета:\n- Страницы: {{ $('Сохраняем полный текст').item.json.pages }}\n- Язык: {{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\n\nОТВЕТ:\nВерни строго JSON без пояснений и лишних полей:\n{\"matched\":bool,\"selected_path\":string|null,\"confidence\":0..1,\"reason\":string,\"needs_new_folder\":bool,\"suggested_path\":string|null}\nselected_path и suggested_path — относительные пути без ведущего слэша, разделитель '/'.\nЕсли matched=false, обязательно needs_new_folder=true и предложи осмысленный suggested_path.\nЕсли matched=true, needs_new_folder=false и укажи selected_path.\n",
         "hasOutputParser": true,
         "options": {}
       },
@@ -317,7 +350,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "Ты готовишь описания и контент PDF.\nDETECTED_LANG={{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\nTEXT:\n---\n{{ $('Text').item.json.text }}\n---\n\nВерни строго JSON без пояснений:\n{\n  \"summaries\": {\"ru\": string, \"de\": string},\n  \"content\": {\n    \"ru\": {\"text\": string, \"source\": \"original\"|\"machine_translation\"},\n    \"de\": {\"text\": string, \"source\": \"original\"|\"machine_translation\"},\n    \"truncated\": bool\n  }\n}\nЕсли исходный язык совпадает с ru или de, используй source=\"original\" и полный текст без перевода для языка-оригинала, другой язык переведи. Если нужно укоротить текст — поставь truncated=true.\n",
+        "text": "Ты готовишь описания и контент PDF.\nDETECTED_LANG={{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\nTEXT:\n---\n{{ $('Сохраняем полный текст').item.json.full_text || $('Text').item.json.text }}\n---\n\nВерни строго JSON без пояснений:\n{\n  \"summaries\": {\"ru\": string, \"de\": string},\n  \"content\": {\n    \"ru\": {\"text\": string, \"source\": \"original\"|\"machine_translation\"},\n    \"de\": {\"text\": string, \"source\": \"original\"|\"machine_translation\"},\n    \"truncated\": bool\n  }\n}\nЕсли исходный язык совпадает с ru или de, используй source=\"original\" и полный текст без перевода для языка-оригинала, другой язык переведи. Если нужно укоротить текст — поставь truncated=true.\n",
         "hasOutputParser": true,
         "options": {}
       },
@@ -332,7 +365,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const ARCHIVE_ROOT = 'C:/Data/archive';\nreturn items.map(item => {\n  const inbox = $('Code in JavaScript').item.json || {};\n  const textInfo = $('Text').item.json || {};\n  const langInfo = $('Lang').item.json || {};\n  const routing = ($('AI Agent').item.json || {}).output || {};\n  const textsOutput = ($('Texts Agent').item.json || {}).output || {};\n\n  const cleanedPath = (routing.selected_path || routing.suggested_path || '').replace(/^=+/, '').trim();\n  const resolvedDir = item.json.dest_dir || (cleanedPath ? `${ARCHIVE_ROOT}/${cleanedPath}` : null);\n  if (!resolvedDir) {\n    throw new Error('Не удалось определить конечную папку архива (dest_dir).');\n  }\n  item.json.dest_dir = resolvedDir;\n\n  const destName = $('Code in JavaScript').item.json?.inbox_name || item.json.dest_name || inbox.inbox_name || 'document.pdf';\n  item.json.dest_name = destName;\n\n  const metadata = {\n    inbox_name: destName,\n    original_inbox_path: inbox.inbox_path,\n    generated_at: new Date().toISOString(),\n    archive: {\n      dest_dir: resolvedDir,\n      dest_name: destName,\n      rel_path: cleanedPath || null\n    },\n    file: {\n      pages: textInfo.pages,\n      size_bytes: textInfo.size_bytes,\n      has_text_layer: textInfo.has_text_layer,\n      used_ocr: textInfo.used_ocr\n    },\n    lang: langInfo,\n    routing: routing\n  };\n\n  if (textsOutput.summaries) {\n    metadata.summaries = textsOutput.summaries;\n  }\n  if (textsOutput.content && Object.prototype.hasOwnProperty.call(textsOutput.content, 'truncated')) {\n    metadata.content_truncated = textsOutput.content.truncated;\n  }\n\n  const preparedContent = {};\n  const contentMeta = {};\n  if (textsOutput.content && typeof textsOutput.content === 'object') {\n    if (textsOutput.content.ru !== undefined) {\n      if (textsOutput.content.ru && typeof textsOutput.content.ru === 'object') {\n        const { text = '', ...rest } = textsOutput.content.ru;\n        preparedContent.ru = { text: text || '', ...rest };\n        if (Object.keys(rest).length) {\n          contentMeta.ru = rest;\n        }\n      } else if (typeof textsOutput.content.ru === 'string') {\n        preparedContent.ru = { text: textsOutput.content.ru };\n      }\n    }\n    if (textsOutput.content.de !== undefined) {\n      if (textsOutput.content.de && typeof textsOutput.content.de === 'object') {\n        const { text = '', ...rest } = textsOutput.content.de;\n        preparedContent.de = { text: text || '', ...rest };\n        if (Object.keys(rest).length) {\n          contentMeta.de = rest;\n        }\n      } else if (typeof textsOutput.content.de === 'string') {\n        preparedContent.de = { text: textsOutput.content.de };\n      }\n    }\n    if (Object.prototype.hasOwnProperty.call(textsOutput.content, 'truncated')) {\n      preparedContent.truncated = textsOutput.content.truncated;\n    }\n  }\n\n  if (Object.keys(contentMeta).length) {\n    metadata.content_meta = contentMeta;\n  }\n\n  item.json.metadata = metadata;\n  item.json.sidecar_content = Object.keys(preparedContent).length ? preparedContent : {};\n  return item;\n});"
+        "jsCode": "const ARCHIVE_ROOT = 'C:/Data/archive';\nreturn items.map(item => {\n  const inbox = $('Code in JavaScript').item.json || {};\n  const textInfo = $('Сохраняем полный текст').item.json || $('Text').item.json || {};\n  const langInfo = $('Lang').item.json || {};\n  const routing = ($('AI Agent').item.json || {}).output || {};\n  const textsOutput = ($('Texts Agent').item.json || {}).output || {};\n\n  const cleanedPath = (routing.selected_path || routing.suggested_path || '').replace(/^=+/, '').trim();\n  const resolvedDir = item.json.dest_dir || (cleanedPath ? `${ARCHIVE_ROOT}/${cleanedPath}` : null);\n  if (!resolvedDir) {\n    throw new Error('Не удалось определить конечную папку архива (dest_dir).');\n  }\n  item.json.dest_dir = resolvedDir;\n\n  const destName = $('Code in JavaScript').item.json?.inbox_name || item.json.dest_name || inbox.inbox_name || 'document.pdf';\n  item.json.dest_name = destName;\n\n  const metadata = {\n    inbox_name: destName,\n    original_inbox_path: inbox.inbox_path,\n    generated_at: new Date().toISOString(),\n    archive: {\n      dest_dir: resolvedDir,\n      dest_name: destName,\n      rel_path: cleanedPath || null\n    },\n    file: {\n      pages: textInfo.pages,\n      size_bytes: textInfo.size_bytes,\n      has_text_layer: textInfo.has_text_layer,\n      used_ocr: textInfo.used_ocr\n    },\n    lang: langInfo,\n    routing: routing\n  };\n\n  if (textsOutput.summaries) {\n    metadata.summaries = textsOutput.summaries;\n  }\n  if (textsOutput.content && Object.prototype.hasOwnProperty.call(textsOutput.content, 'truncated')) {\n    metadata.content_truncated = textsOutput.content.truncated;\n  }\n\n  const preparedContent = {};\n  const contentMeta = {};\n  if (textsOutput.content && typeof textsOutput.content === 'object') {\n    if (textsOutput.content.ru !== undefined) {\n      if (textsOutput.content.ru && typeof textsOutput.content.ru === 'object') {\n        const { text = '', ...rest } = textsOutput.content.ru;\n        preparedContent.ru = { text: text || '', ...rest };\n        if (Object.keys(rest).length) {\n          contentMeta.ru = rest;\n        }\n      } else if (typeof textsOutput.content.ru === 'string') {\n        preparedContent.ru = { text: textsOutput.content.ru };\n      }\n    }\n    if (textsOutput.content.de !== undefined) {\n      if (textsOutput.content.de && typeof textsOutput.content.de === 'object') {\n        const { text = '', ...rest } = textsOutput.content.de;\n        preparedContent.de = { text: text || '', ...rest };\n        if (Object.keys(rest).length) {\n          contentMeta.de = rest;\n        }\n      } else if (typeof textsOutput.content.de === 'string') {\n        preparedContent.de = { text: textsOutput.content.de };\n      }\n    }\n    if (Object.prototype.hasOwnProperty.call(textsOutput.content, 'truncated')) {\n      preparedContent.truncated = textsOutput.content.truncated;\n    }\n  }\n\n  if (Object.keys(contentMeta).length) {\n    metadata.content_meta = contentMeta;\n  }\n\n  item.json.metadata = metadata;\n  item.json.sidecar_content = Object.keys(preparedContent).length ? preparedContent : {};\n  return item;\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -394,7 +427,7 @@
       "main": [
         [
           {
-            "node": "Lang",
+            "node": "Сохраняем полный текст",
             "type": "main",
             "index": 0
           }
@@ -552,6 +585,17 @@
         [
           {
             "node": "Перемещаем файл при готовой папке",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сохраняем полный текст": {
+      "main": [
+        [
+          {
+            "node": "Lang",
             "type": "main",
             "index": 0
           }
