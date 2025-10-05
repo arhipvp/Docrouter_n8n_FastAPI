@@ -9,7 +9,8 @@ import threading
 import queue
 import logging
 import time
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -51,6 +52,8 @@ class MoveIn(BaseModel):
     src_path: str
     dest_dir: str
     dest_name: str
+    metadata: Optional[Any] = None
+    content: Optional[Any] = None
 
 class MkdirIn(BaseModel):
     rel_path: str  # относительный путь от C:\Data\archive (со слэшами '/')
@@ -108,6 +111,126 @@ def safe(s: str) -> str:
     return (s or "").strip().replace("/", "_").replace("\\", "_").replace(":", "_")\
         .replace("*", "_").replace("?", "_").replace('"', "_").replace("<", "_")\
         .replace(">", "_").replace("|", "_")[:80]
+
+
+def _coerce_json_like(value: Any, field_name: str) -> Optional[Any]:
+    """Принимает dict/строку JSON и приводит к питоновскому объекту."""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            logger.warning(f"/fs-move: {field_name} received a non-JSON string; keeping raw text")
+            return stripped
+    logger.warning(f"/fs-move: {field_name} has unsupported type {type(value)}; ignoring")
+    return None
+
+
+def _ensure_mapping(value: Any, field_name: str) -> Dict[str, Any]:
+    coerced = _coerce_json_like(value, field_name)
+    if coerced is None:
+        return {}
+    if isinstance(coerced, dict):
+        return coerced
+    logger.warning(f"/fs-move: {field_name} is not a dict after coercion; ignoring")
+    return {}
+
+
+def _split_content_entry(entry: Any) -> tuple[str, Dict[str, Any]]:
+    text = ""
+    meta: Dict[str, Any] = {}
+    if isinstance(entry, dict):
+        text = str(entry.get("text") or "")
+        meta = {k: v for k, v in entry.items() if k != "text"}
+    elif isinstance(entry, str):
+        text = entry
+    elif entry is not None:
+        text = str(entry)
+    return text, meta
+
+
+def _create_sidecars(dest: Path, src: str, metadata_raw: Any, content_raw: Any) -> Dict[str, str]:
+    metadata = _ensure_mapping(metadata_raw, "metadata").copy()
+    content = _ensure_mapping(content_raw, "content")
+
+    archive_rel = None
+    try:
+        archive_rel = dest.relative_to(ARCHIVE_ROOT)
+    except ValueError:
+        archive_rel = None
+
+    metadata.setdefault("pdf_name", dest.name)
+    metadata.setdefault("pdf_path", str(dest))
+    metadata.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
+
+    source_info = metadata.get("source_pdf")
+    if not isinstance(source_info, dict):
+        source_info = {}
+    source_info.setdefault("moved_from", src)
+    source_info.setdefault("archive_dir", str(dest.parent))
+    source_info.setdefault("archive_file", dest.name)
+    if archive_rel is not None:
+        source_info.setdefault("archive_rel", str(archive_rel))
+    metadata["source_pdf"] = source_info
+
+    metadata_path = dest.with_name("metadata.json")
+    ru_path = dest.with_name("content.ru.txt")
+    de_path = dest.with_name("content.de.txt")
+
+    ru_text, ru_meta = _split_content_entry(content.get("ru")) if isinstance(content, dict) else ("", {})
+    de_text, de_meta = _split_content_entry(content.get("de")) if isinstance(content, dict) else ("", {})
+
+    content_meta: Dict[str, Any] = {}
+    if ru_meta:
+        content_meta["ru"] = ru_meta
+    if de_meta:
+        content_meta["de"] = de_meta
+    truncated_flag = None
+    if isinstance(content, dict) and "truncated" in content:
+        truncated_flag = bool(content.get("truncated"))
+    if truncated_flag is not None:
+        metadata.setdefault("content_truncated", truncated_flag)
+    if content_meta:
+        existing_meta = metadata.get("content_meta")
+        if isinstance(existing_meta, dict):
+            existing_meta.update(content_meta)
+            metadata["content_meta"] = existing_meta
+        else:
+            metadata["content_meta"] = content_meta
+
+    sidecar_info = metadata.get("sidecars")
+    if not isinstance(sidecar_info, dict):
+        sidecar_info = {}
+    sidecar_info.setdefault("metadata", metadata_path.name)
+    sidecar_info.setdefault("content_ru", ru_path.name)
+    sidecar_info.setdefault("content_de", de_path.name)
+    metadata["sidecars"] = sidecar_info
+
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    ru_path.write_text(ru_text or "", encoding="utf-8")
+    de_path.write_text(de_text or "", encoding="utf-8")
+
+    created = {
+        "metadata": str(metadata_path),
+        "content_ru": str(ru_path),
+        "content_de": str(de_path),
+    }
+
+    for name, path in created.items():
+        if not Path(path).exists():
+            logger.error(f"/fs-move: {name} sidecar missing after write: {path}")
+        else:
+            logger.info(f"/fs-move: sidecar created {name} → {path}")
+
+    return created
 
 
 def _read_pdf_text(path: str) -> str:
@@ -535,7 +658,10 @@ def fs_move(body: MoveIn):
         shutil.move(src, dest)
         dest_str = str(dest)
         logger.info(f"/fs-move: moved to {dest_str}")
-        return {"ok": True, "dest_path": dest_str}
+
+        sidecars = _create_sidecars(dest, src, body.metadata, body.content)
+        logger.info(f"/fs-move: sidecars ready {sidecars}")
+        return {"ok": True, "dest_path": dest_str, "sidecars": sidecars}
     except Exception as e:
         logger.exception("/fs-move failed")
         return JSONResponse({"error": "move_failed", "detail": str(e)}, status_code=500)

@@ -220,11 +220,19 @@
             },
             {
               "name": "dest_dir",
-              "value": "={{ $json.dest_dir || ('C:/Data/archive/' + ($('AI Agent').item.json.output.selected_path || $('AI Agent').item.json.output.suggested_path || '').replace(/^=+/, '').trim()) }}"
+              "value": "={{ $json.dest_dir }}"
             },
             {
               "name": "dest_name",
               "value": "={{ $('Code in JavaScript').item.json.inbox_name }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ $json.metadata }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.sidecar_content }}"
             }
           ]
         },
@@ -262,6 +270,72 @@
       ],
       "id": "fe730eea-a02e-4272-8cd4-a9a74fb1db47",
       "name": "Делаем новую папку"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "responseFormat": "json_object"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        528,
+        432
+      ],
+      "id": "a200cf76-61dc-471a-b8f8-e8b86561e387",
+      "name": "OpenRouter Chat Model (Texts)",
+      "credentials": {
+        "openRouterApi": {
+          "id": "VddzAlbgBaLnDjLZ",
+          "name": "OpenRouter account"
+        }
+      },
+      "notes": "Генерирует summary и полный текст (RU/DE) по PDF контенту."
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"summaries\": {\"type\": \"object\", \"properties\": {\"ru\": {\"type\": \"string\"}, \"de\": {\"type\": \"string\"}}, \"required\": [\"ru\", \"de\"], \"additionalProperties\": false}, \"content\": {\"type\": \"object\", \"properties\": {\"ru\": {\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\"}, \"source\": {\"type\": \"string\", \"enum\": [\"original\", \"machine_translation\"]}}, \"required\": [\"text\", \"source\"], \"additionalProperties\": true}, \"de\": {\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\"}, \"source\": {\"type\": \"string\", \"enum\": [\"original\", \"machine_translation\"]}}, \"required\": [\"text\", \"source\"], \"additionalProperties\": true}, \"truncated\": {\"type\": \"boolean\"}}, \"required\": [\"ru\", \"de\"], \"additionalProperties\": false}}, \"required\": [\"summaries\", \"content\"], \"additionalProperties\": false}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        752,
+        416
+      ],
+      "id": "1e671869-a2d4-4adb-81a4-bd25b5e3d0d1",
+      "name": "Texts Output Parser"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Ты готовишь описания и контент PDF.\nDETECTED_LANG={{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\nTEXT:\n---\n{{ $('Text').item.json.text }}\n---\n\nВерни строго JSON без пояснений:\n{\n  \"summaries\": {\"ru\": string, \"de\": string},\n  \"content\": {\n    \"ru\": {\"text\": string, \"source\": \"original\"|\"machine_translation\"},\n    \"de\": {\"text\": string, \"source\": \"original\"|\"machine_translation\"},\n    \"truncated\": bool\n  }\n}\nЕсли исходный язык совпадает с ru или de, используй source=\"original\" и полный текст без перевода для языка-оригинала, другой язык переведи. Если нужно укоротить текст — поставь truncated=true.\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        624,
+        320
+      ],
+      "id": "d8d42022-ce08-4f53-bfda-a7f28f03f436",
+      "name": "Texts Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ARCHIVE_ROOT = 'C:/Data/archive';\nreturn items.map(item => {\n  const inbox = $('Code in JavaScript').item.json || {};\n  const textInfo = $('Text').item.json || {};\n  const langInfo = $('Lang').item.json || {};\n  const routing = ($('AI Agent').item.json || {}).output || {};\n  const textsOutput = ($('Texts Agent').item.json || {}).output || {};\n\n  const cleanedPath = (routing.selected_path || routing.suggested_path || '').replace(/^=+/, '').trim();\n  const resolvedDir = item.json.dest_dir || (cleanedPath ? `${ARCHIVE_ROOT}/${cleanedPath}` : null);\n  if (!resolvedDir) {\n    throw new Error('Не удалось определить конечную папку архива (dest_dir).');\n  }\n  item.json.dest_dir = resolvedDir;\n\n  const destName = $('Code in JavaScript').item.json?.inbox_name || item.json.dest_name || inbox.inbox_name || 'document.pdf';\n  item.json.dest_name = destName;\n\n  const metadata = {\n    inbox_name: destName,\n    original_inbox_path: inbox.inbox_path,\n    generated_at: new Date().toISOString(),\n    archive: {\n      dest_dir: resolvedDir,\n      dest_name: destName,\n      rel_path: cleanedPath || null\n    },\n    file: {\n      pages: textInfo.pages,\n      size_bytes: textInfo.size_bytes,\n      has_text_layer: textInfo.has_text_layer,\n      used_ocr: textInfo.used_ocr\n    },\n    lang: langInfo,\n    routing: routing\n  };\n\n  if (textsOutput.summaries) {\n    metadata.summaries = textsOutput.summaries;\n  }\n  if (textsOutput.content && Object.prototype.hasOwnProperty.call(textsOutput.content, 'truncated')) {\n    metadata.content_truncated = textsOutput.content.truncated;\n  }\n\n  const preparedContent = {};\n  const contentMeta = {};\n  if (textsOutput.content && typeof textsOutput.content === 'object') {\n    if (textsOutput.content.ru !== undefined) {\n      if (textsOutput.content.ru && typeof textsOutput.content.ru === 'object') {\n        const { text = '', ...rest } = textsOutput.content.ru;\n        preparedContent.ru = { text: text || '', ...rest };\n        if (Object.keys(rest).length) {\n          contentMeta.ru = rest;\n        }\n      } else if (typeof textsOutput.content.ru === 'string') {\n        preparedContent.ru = { text: textsOutput.content.ru };\n      }\n    }\n    if (textsOutput.content.de !== undefined) {\n      if (textsOutput.content.de && typeof textsOutput.content.de === 'object') {\n        const { text = '', ...rest } = textsOutput.content.de;\n        preparedContent.de = { text: text || '', ...rest };\n        if (Object.keys(rest).length) {\n          contentMeta.de = rest;\n        }\n      } else if (typeof textsOutput.content.de === 'string') {\n        preparedContent.de = { text: textsOutput.content.de };\n      }\n    }\n    if (Object.prototype.hasOwnProperty.call(textsOutput.content, 'truncated')) {\n      preparedContent.truncated = textsOutput.content.truncated;\n    }\n  }\n\n  if (Object.keys(contentMeta).length) {\n    metadata.content_meta = contentMeta;\n  }\n\n  item.json.metadata = metadata;\n  item.json.sidecar_content = Object.keys(preparedContent).length ? preparedContent : {};\n  return item;\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        128
+      ],
+      "id": "7dd35728-68f7-4718-bade-70f3c33d16ad",
+      "name": "Собираем метаданные"
     }
   ],
   "pinData": {},
@@ -329,6 +403,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Texts Agent",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -376,7 +457,7 @@
         ],
         [
           {
-            "node": "Перемещаем файл при готовой папке",
+            "node": "Собираем метаданные",
             "type": "main",
             "index": 0
           }
@@ -387,7 +468,7 @@
       "main": [
         [
           {
-            "node": "Перемещаем файл при готовой папке",
+            "node": "Собираем метаданные",
             "type": "main",
             "index": 0
           }
@@ -410,6 +491,40 @@
         [
           {
             "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model (Texts)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Texts Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Texts Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Texts Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Texts Agent": {},
+    "Собираем метаданные": {
+      "main": [
+        [
+          {
+            "node": "Перемещаем файл при готовой папке",
             "type": "main",
             "index": 0
           }
