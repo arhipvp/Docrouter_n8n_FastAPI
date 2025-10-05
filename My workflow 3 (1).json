@@ -83,6 +83,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const textData = $('Text').item.json;\nconst langData = $('Lang').item.json;\nconst fileData = $('Code in JavaScript').item.json;\nconst normalize = value => (value ?? '').toString();\nconst fullText = normalize(textData.text);\nconst trimmed = fullText.trim();\nconst limit = 15000;\nconst truncatedText = trimmed.length > limit ? trimmed.slice(0, limit) : trimmed;\nconst truncated = trimmed.length > limit;\nconst summarize = (input, size = 400) => {\n  const compact = (input || '').replace(/\\s+/g, ' ').trim();\n  if (!compact) return '';\n  if (compact.length <= size) return compact;\n  const slice = compact.slice(0, size);\n  const cut = slice.lastIndexOf(' ');\n  return (cut > 120 ? slice.slice(0, cut) : slice).trim() + '…';\n};\nconst summaryForLang = (langCode) => {\n  if (langData.detected_lang === langCode) {\n    return summarize(truncatedText, 400);\n  }\n  const placeholders = {\n    ru: 'Краткое описание на русском получено автоматически (заглушка).',\n    de: 'Kurzzusammenfassung auf Deutsch automatisch erzeugt (Platzhalter).'\n  };\n  const base = summarize(truncatedText, 400);\n  return `${placeholders[langCode] || 'Summary placeholder.'}${base ? `\\n\\n${base}` : ''}`;\n};\nconst buildContent = (langCode) => {\n  const isOriginal = langData.detected_lang === langCode;\n  if (isOriginal) {\n    return { text: truncatedText, source: 'original' };\n  }\n  const placeholders = {\n    ru: 'Автоматический перевод недоступен. Заглушка.',\n    de: 'Automatische Übersetzung nicht verfügbar. Platzhalter.'\n  };\n  const preface = placeholders[langCode] || 'Translation placeholder.';\n  return { text: `${preface}\\n\\n${truncatedText}`, source: 'machine_translation_placeholder' };\n};\nreturn items.map(item => {\n  item.json.sidecar_metadata = {\n    inbox: { name: fileData.inbox_name, path: fileData.inbox_path },\n    extract: {\n      pages: textData.pages,\n      size_bytes: textData.size_bytes,\n      has_text_layer: textData.has_text_layer,\n      used_ocr: textData.used_ocr\n    },\n    language: { detected: langData.detected_lang, probability: langData.prob }\n  };\n  item.json.sidecar_summaries = {\n    ru: summaryForLang('ru'),\n    de: summaryForLang('de')\n  };\n  item.json.sidecar_content = {\n    ru: buildContent('ru'),\n    de: buildContent('de')\n  };\n  item.json.sidecar_content_truncated = truncated;\n  item.json.sidecar_source_text = truncatedText;\n  return item;\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        112
+      ],
+      "id": "9e3f0b10-8d33-4a6c-9b70-c6d2babc7aa1",
+      "name": "Подготовка сайдкаров"
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://127.0.0.1:8081/extract-text-by-path",
         "sendBody": true,
@@ -212,22 +225,8 @@
         "method": "POST",
         "url": "http://127.0.0.1:8081/fs-move",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "src_path",
-              "value": "={{ $('Code in JavaScript').item.json.inbox_path }}"
-            },
-            {
-              "name": "dest_dir",
-              "value": "={{ $json.dest_dir || ('C:/Data/archive/' + ($('AI Agent').item.json.output.selected_path || $('AI Agent').item.json.output.suggested_path || '').replace(/^=+/, '').trim()) }}"
-            },
-            {
-              "name": "dest_name",
-              "value": "={{ $('Code in JavaScript').item.json.inbox_name }}"
-            }
-          ]
-        },
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ {\\n  src_path: $('Code in JavaScript').item.json.inbox_path,\\n  dest_dir: $json.dest_dir || ('C:/Data/archive/' + (($('AI Agent').item.json.output.selected_path || $('AI Agent').item.json.output.suggested_path || '').replace(/^=+/, '').trim())),\\n  dest_name: $('Code in JavaScript').item.json.inbox_name,\\n  metadata: $('Подготовка сайдкаров').item.json.sidecar_metadata,\\n  summaries: $('Подготовка сайдкаров').item.json.sidecar_summaries,\\n  content: $('Подготовка сайдкаров').item.json.sidecar_content,\\n  content_truncated: $('Подготовка сайдкаров').item.json.sidecar_content_truncated,\\n  source_text: $('Подготовка сайдкаров').item.json.sidecar_source_text\\n} }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -326,6 +325,11 @@
         [
           {
             "node": "Folder Endpoints",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Подготовка сайдкаров",
             "type": "main",
             "index": 0
           }
