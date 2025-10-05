@@ -31,7 +31,8 @@
     {
       "parameters": {
         "options": {
-          "reset": false
+          "reset": false,
+          "batchSize": 1
         }
       },
       "type": "n8n-nodes-base.splitInBatches",
@@ -42,17 +43,6 @@
       ],
       "id": "bd4ac4c6-2b6f-4eb0-a9b9-5bc9e40841f9",
       "name": "Loop Over Items"
-    },
-    {
-      "parameters": {},
-      "type": "n8n-nodes-base.noOp",
-      "name": "Replace Me",
-      "typeVersion": 1,
-      "position": [
-        -272,
-        160
-      ],
-      "id": "35f1a003-67f9-435b-a187-6758050a1ffd"
     },
     {
       "parameters": {
@@ -117,16 +107,8 @@
     },
     {
       "parameters": {
-        "url": "http://127.0.0.1:8081/list-archive-tree",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "root",
-              "value": "C:\\Data\\archive"
-            }
-          ]
-        },
+        "method": "GET",
+        "url": "http://127.0.0.1:8081/folder-endpoints",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -136,12 +118,12 @@
         -80
       ],
       "id": "5a63a32c-0c07-4deb-8e8a-1a2a30bcad8d",
-      "name": "HTTP Request"
+      "name": "Folder Endpoints"
     },
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Ты маршрутизатор документов.\nВот полное дерево папок {{ JSON.stringify($json.tree) }}.\nВот содержание документа: {{ $('Text').item.json.text }}, на {{ $('Text').item.json.pages }} страниц\nЯзык документа: {{ $('Lang').item.json.detected_lang }}\nТвоя задача: выбрать ЛУЧШУЮ конечную папку в дереве ИЛИ предложить новый путь.\n\nОТВЕТ:\nВерни СТРОГО ОДИН корректный JSON-объект БЕЗ какого-либо текста до/после/вокруг, без комментариев, без кавычек типа «…», без круглых скобок. Только фигурные скобки {}.\n\nТолько такие поля и типы:\n{\n  \"matched\": true|false,\n  \"file_name\": string,\n  \"selected_path\": string|null,\n  \"confidence\": number,        // от 0 до 1\n  \"reason\": string,\n  \"needs_new_folder\": true|false,\n  \"suggested_path\": string|null\n}\n\nПравила:\n- Если подходящая папка найдена → matched=true, selected_path=\"каталог/подкаталог/issuer/person\", needs_new_folder=false.\n- Если не найдена → matched=false, needs_new_folder=true и предложи \"suggested_path\" (относительный путь с '/' любой глубины, логичный по содержанию).\n- Все пути ДОЛЖНЫ быть относительными (без начального слэша) и использовать '/'.\n- Ключи и строковые значения — ТОЛЬКО в двойных кавычках \".\n- Никаких лишних полей. Никаких пояснений вне JSON.",
+        "text": "Ты маршрутизатор документов.\nFOLDER_ENDPOINTS:\n{{ JSON.stringify($('Folder Endpoints').item.json.folder_endpoints, null, 2) }}\nTEXT:\n---\n{{ $('Text').item.json.text }}\n---\nМета:\n- Страницы: {{ $('Text').item.json.pages }}\n- Язык: {{ $('Lang').item.json.detected_lang }} (prob={{ $('Lang').item.json.prob }})\n\nОТВЕТ:\nВерни строго JSON без пояснений и лишних полей:\n{\"matched\":bool,\"selected_path\":string|null,\"confidence\":0..1,\"reason\":string,\"needs_new_folder\":bool,\"suggested_path\":string|null}\nselected_path и suggested_path — относительные пути без ведущего слэша, разделитель '/'.\nЕсли matched=false, обязательно needs_new_folder=true и предложи осмысленный suggested_path.\nЕсли matched=true, needs_new_folder=false и укажи selected_path.\n",
         "hasOutputParser": true,
         "options": {}
       },
@@ -180,7 +162,7 @@
     {
       "parameters": {
         "schemaType": "manual",
-        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"matched\": { \"type\": \"boolean\" },\n    \"file_name\": { \"type\": [\"string\", \"null\"] },\n    \"selected_path\": { \"type\": [\"string\", \"null\"] },\n    \"confidence\": { \"type\": \"number\", \"minimum\": 0, \"maximum\": 1 },\n    \"reason\": { \"type\": \"string\" },\n    \"needs_new_folder\": { \"type\": \"boolean\" },\n    \"suggested_path\": { \"type\": [\"string\", \"null\"] }\n  },\n  \"required\": [\"matched\", \"selected_path\", \"confidence\", \"reason\", \"needs_new_folder\", \"suggested_path\"],\n  \"additionalProperties\": false\n}\n"
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"matched\": {\n      \"type\": \"boolean\"\n    },\n    \"selected_path\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ]\n    },\n    \"confidence\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"maximum\": 1\n    },\n    \"reason\": {\n      \"type\": \"string\"\n    },\n    \"needs_new_folder\": {\n      \"type\": \"boolean\"\n    },\n    \"suggested_path\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ]\n    }\n  },\n  \"required\": [\n    \"matched\",\n    \"selected_path\",\n    \"confidence\",\n    \"reason\",\n    \"needs_new_folder\",\n    \"suggested_path\"\n  ],\n  \"additionalProperties\": false\n}\n"
       },
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
@@ -238,7 +220,7 @@
             },
             {
               "name": "dest_dir",
-              "value": "={{ \n  $json.dest_dir || \n  'C:/Data/archive/' + ($('AI Agent').item.json.output.selected_path || $('AI Agent').item.json.output.suggested_path) \n}}"
+              "value": "={{ $json.dest_dir || ('C:/Data/archive/' + ($('AI Agent').item.json.output.selected_path || $('AI Agent').item.json.output.suggested_path || '').replace(/^=+/, '').trim()) }}"
             },
             {
               "name": "dest_name",
@@ -265,8 +247,8 @@
         "bodyParameters": {
           "parameters": [
             {
-              "name": "=rel_path",
-              "value": "={{ $('AI Agent').item.json.output.suggested_path }}"
+              "name": "rel_path",
+              "value": "={{ ($('AI Agent').item.json.output.suggested_path || '').replace(/^=+/, '').trim() }}"
             }
           ]
         },
@@ -314,24 +296,6 @@
             "type": "main",
             "index": 0
           }
-        ],
-        [
-          {
-            "node": "Replace Me",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Replace Me": {
-      "main": [
-        [
-          {
-            "node": "Loop Over Items",
-            "type": "main",
-            "index": 0
-          }
         ]
       ]
     },
@@ -361,18 +325,7 @@
       "main": [
         [
           {
-            "node": "HTTP Request",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "HTTP Request": {
-      "main": [
-        [
-          {
-            "node": "AI Agent",
+            "node": "Folder Endpoints",
             "type": "main",
             "index": 0
           }
@@ -435,6 +388,28 @@
         [
           {
             "node": "Перемещаем файл при готовой папке",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Folder Endpoints": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Перемещаем файл при готовой папке": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
           }
