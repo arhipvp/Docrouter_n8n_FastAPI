@@ -9,7 +9,8 @@ import threading
 import queue
 import logging
 import time
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -47,10 +48,20 @@ class RouteApplyIn(BaseModel):
     inbox_name: str                  # исходное имя файла из инбокса (с расширением)
     selected_path: str               # относительный путь с '/' (как отдаёт ИИ)
 
+class ContentBundle(BaseModel):
+    text: str
+    source: Optional[str] = None
+
+
 class MoveIn(BaseModel):
     src_path: str
     dest_dir: str
     dest_name: str
+    metadata: Optional[Dict[str, Any]] = None
+    summaries: Optional[Dict[str, str]] = None
+    content: Optional[Dict[str, ContentBundle]] = None
+    content_truncated: Optional[bool] = None
+    source_text: Optional[str] = None
 
 class MkdirIn(BaseModel):
     rel_path: str  # относительный путь от C:\Data\archive (со слэшами '/')
@@ -108,6 +119,84 @@ def safe(s: str) -> str:
     return (s or "").strip().replace("/", "_").replace("\\", "_").replace(":", "_")\
         .replace("*", "_").replace("?", "_").replace('"', "_").replace("<", "_")\
         .replace(">", "_").replace("|", "_")[:80]
+
+
+def _normalize_whitespace(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _make_summary(text: str, limit: int = 400) -> str:
+    normalized = _normalize_whitespace(text)
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return normalized
+    clipped = normalized[:limit].rsplit(" ", 1)[0]
+    return clipped + "…"
+
+
+def _fallback_text(lang_code: str, source_text: str) -> str:
+    snippet = (source_text or "").strip()
+    limit = 4000
+    if len(snippet) > limit:
+        snippet = snippet[:limit].rsplit("\n", 1)[0]
+    if not snippet:
+        snippet = "(текст отсутствует)"
+    if lang_code == "ru":
+        header = "⚠️ Текст не предоставлен. Автоматическая заглушка."
+    elif lang_code == "de":
+        header = "⚠️ Text nicht verfügbar. Automatisch erzeugter Platzhalter."
+    else:
+        header = "⚠️ Auto-generated placeholder text."
+    return f"{header}\n\n{snippet}"
+
+
+def _ensure_sidecars(dest: Path, body: MoveIn) -> Dict[str, str]:
+    created: Dict[str, str] = {}
+    base_dir = dest.parent
+    stem = dest.stem
+
+    metadata_payload: Dict[str, Any] = {}
+    metadata_payload.update(body.metadata or {})
+    metadata_payload.setdefault("original_src_path", os.path.normpath(body.src_path))
+    metadata_payload.setdefault("dest_path", str(dest))
+    metadata_payload.setdefault("dest_dir", str(base_dir))
+    metadata_payload.setdefault("dest_name", dest.name)
+    metadata_payload.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
+
+    summaries = dict(body.summaries or {})
+
+    content_sources: Dict[str, str] = {}
+    requested_content = body.content or {}
+
+    for lang_code in ("ru", "de"):
+        bundle = requested_content.get(lang_code)
+        if bundle and bundle.text:
+            text_to_write = bundle.text
+            source_label = bundle.source or "provided"
+        else:
+            text_to_write = _fallback_text(lang_code, body.source_text or "")
+            source_label = "fallback"
+        if not summaries.get(lang_code):
+            summaries[lang_code] = _make_summary(text_to_write)
+
+        content_path = base_dir / f"{stem}.content.{lang_code}.txt"
+        content_path.write_text(text_to_write, encoding="utf-8")
+        content_sources[lang_code] = source_label
+        created[f"content_{lang_code}"] = str(content_path)
+
+    metadata_payload.setdefault("summaries", summaries)
+    metadata_payload.setdefault("content_sources", content_sources)
+    metadata_payload.setdefault("content_truncated", bool(body.content_truncated))
+
+    metadata_path = base_dir / f"{stem}.metadata.json"
+    metadata_path.write_text(
+        json.dumps(metadata_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    created["metadata"] = str(metadata_path)
+
+    return created
 
 
 def _read_pdf_text(path: str) -> str:
@@ -535,7 +624,12 @@ def fs_move(body: MoveIn):
         shutil.move(src, dest)
         dest_str = str(dest)
         logger.info(f"/fs-move: moved to {dest_str}")
-        return {"ok": True, "dest_path": dest_str}
+        try:
+            sidecars = _ensure_sidecars(dest, body)
+        except Exception as e:
+            logger.exception("/fs-move: sidecar generation failed")
+            raise HTTPException(status_code=500, detail=f"sidecar_generation_failed: {e}")
+        return {"ok": True, "dest_path": dest_str, "sidecars": sidecars}
     except Exception as e:
         logger.exception("/fs-move failed")
         return JSONResponse({"error": "move_failed", "detail": str(e)}, status_code=500)
