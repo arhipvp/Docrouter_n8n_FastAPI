@@ -31,6 +31,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("docrouter.fastapi")
 
+ARCHIVE_ROOT = Path(r"C:\Data\archive").resolve()
+
 # --------------------------------------------------------------------------------------
 # Langdetect globals
 # --------------------------------------------------------------------------------------
@@ -475,22 +477,48 @@ def route_apply(body: RouteApplyIn):
 @app.post("/fs-move")
 def fs_move(body: MoveIn):
     src = os.path.normpath(body.src_path)
-    dest_dir = os.path.normpath(body.dest_dir)
+    dest_dir_raw = (body.dest_dir or "")
+    dest_dir = dest_dir_raw.lstrip("=").strip()
     dest_name = body.dest_name
 
     for bad in '\\/:*?"<>|':
         dest_name = dest_name.replace(bad, "_")
 
-    logger.info(f"/fs-move: {src} → {dest_dir}\\{dest_name}")
+    if not dest_dir:
+        logger.warning("/fs-move: dest_dir missing")
+        raise HTTPException(status_code=400, detail="dest_dir is required")
+
+    try:
+        dest_dir_path = Path(dest_dir).resolve()
+    except Exception as e:
+        logger.warning(f"/fs-move: dest_dir resolve failed {dest_dir}: {e}")
+        raise HTTPException(status_code=400, detail="dest_dir is invalid")
+
+    if not dest_dir_path.is_absolute():
+        logger.warning(f"/fs-move: dest_dir not absolute {dest_dir_path}")
+        raise HTTPException(status_code=400, detail="dest_dir must be absolute")
+
+    if dest_dir_path.suffix.lower() == ".pdf":
+        logger.warning(f"/fs-move: dest_dir points to file {dest_dir_path}")
+        raise HTTPException(status_code=400, detail="dest_dir must be a directory, not a PDF file")
+
+    try:
+        dest_dir_path.relative_to(ARCHIVE_ROOT)
+    except ValueError:
+        logger.warning(f"/fs-move: dest_dir outside archive {dest_dir_path}")
+        raise HTTPException(status_code=400, detail="dest_dir must be inside the archive root")
+
+    logger.info(f"/fs-move: {src} → {dest_dir_path}\\{dest_name}")
     if not os.path.exists(src):
         logger.warning(f"/fs-move: src missing {src}")
         return JSONResponse({"error": "src_missing", "path": src}, status_code=404)
     try:
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, dest_name)
+        os.makedirs(dest_dir_path, exist_ok=True)
+        dest = dest_dir_path / dest_name
         shutil.move(src, dest)
-        logger.info(f"/fs-move: moved to {dest}")
-        return {"ok": True, "dest_path": dest}
+        dest_str = str(dest)
+        logger.info(f"/fs-move: moved to {dest_str}")
+        return {"ok": True, "dest_path": dest_str}
     except Exception as e:
         logger.exception("/fs-move failed")
         return JSONResponse({"error": "move_failed", "detail": str(e)}, status_code=500)
